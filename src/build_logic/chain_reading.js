@@ -2,15 +2,28 @@
 import {createConfig, http, readContract, fetchBlockNumber, fetchEnsName, getBlock} from '@wagmi/core';
 import {mainnet, optimism, optimismSepolia, arbitrum} from '@wagmi/core/chains';
 import {brABI as abi} from "../abi/blueRailroadABI.js";
+import {blueRailroadV2ABI} from "../abi/blueRailroadV2ABI.js";
 import {setStoneABI} from "../abi/setStoneABI.js";
-import { setStoneContractAddress, blueRailroadContractAddress, AVERAGE_BLOCK_TIME, ticketStubClaimerContractAddress } from "./constants.js";
+import { setStoneContractAddress, blueRailroadContractAddress, blueRailroadV2ContractAddress, AVERAGE_BLOCK_TIME, ticketStubClaimerContractAddress } from "./constants.js";
 import {ticketStubClaimerABI} from "../abi/ticketStubClaimerABI.js";
 import {getVowelsoundContributions} from "./revealer_utils.js";
 import Web3 from 'web3';
+import enumerableContracts from './enumerable_contracts.json' with { type: 'json' };
 
 const web3 = new Web3();
 import { config as dotenvConfig } from 'dotenv';
 import {fileURLToPath} from "url";
+
+// Check if a contract is enabled in the enumerable contracts config
+function isContractEnabled(name) {
+    const contract = enumerableContracts.contracts.find(c => c.name === name);
+    return contract && !contract.disabled;
+}
+
+// Get contract config by name
+function getContractConfig(name) {
+    return enumerableContracts.contracts.find(c => c.name === name);
+}
 import path from "path";
 import fs from "fs";
 import { getProjectDirs } from "./locations.js";
@@ -341,15 +354,113 @@ export async function getBlueRailroads(config) {
             args: [tokenId],
         });
 
+        // Fetch songId for this token
+        let songId = await readContract(config, {
+            abi,
+            address: blueRailroadContractAddress,
+            functionName: 'tokenIdToSongId',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        // Fetch date for this token (YYYYMMDD format)
+        let date = await readContract(config, {
+            abi,
+            address: blueRailroadContractAddress,
+            functionName: 'tokenIdToDate',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        // Resolve ENS name for owner (falls back to address if no ENS)
+        let ownerDisplay = await fetchEnsName(config, { address: ownerOfThisToken, chainId: 1 });
+        if (ownerDisplay === undefined || ownerDisplay === null) {
+            ownerDisplay = ownerOfThisToken;
+        }
+
         blueRailroads[tokenId] = {
+            id: tokenId,
             owner: ownerOfThisToken,
+            ownerDisplay: ownerDisplay,
             uri: uriOfVideo,
-            id: tokenId
+            songId: songId,
+            date: date
         };
 
+        console.log(`Blue Railroad #${tokenId}: song ${songId}, date ${date}, owner ${ownerDisplay}`);
     }
     console.timeEnd("Blue Railroads (listen to that old smokestack)");
     return blueRailroads;
+}
+
+/**
+ * Fetch Blue Railroad V2 tokens with onchain metadata
+ * V2 stores songId, blockheight, and IPFS video hash onchain
+ */
+export async function getBlueRailroadV2s(config) {
+    console.time("Blue Railroad V2s");
+
+    const totalSupply = await readContract(config, {
+        abi: blueRailroadV2ABI,
+        address: blueRailroadV2ContractAddress,
+        functionName: 'totalSupply',
+        chainId: optimism.id,
+    });
+
+    let blueRailroadV2s = {};
+
+    for (let i = 0; i < totalSupply; i++) {
+        const tokenId = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenByIndex',
+            chainId: optimism.id,
+            args: [i],
+        });
+
+        const owner = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'ownerOf',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        const songId = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenIdToSongId',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        const blockheight = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenIdToBlockheight',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        const videoHash = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenIdToVideoHash',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        blueRailroadV2s[tokenId.toString()] = {
+            id: tokenId,
+            owner: owner,
+            songId: Number(songId),
+            blockheight: Number(blockheight),
+            videoHash: videoHash, // bytes32 as hex string
+        };
+    }
+
+    console.timeEnd("Blue Railroad V2s");
+    return blueRailroadV2s;
 }
 
 export function appendChainDataToShows(shows, chainData) {
@@ -440,20 +551,35 @@ export async function fetch_chaindata(shows) {
     const optimismSepoliaBlockNumber = await fetchBlockNumber(config, {chainId: optimismSepolia.id});
     console.timeEnd("Block Heights");
 
-    const blueRailroads = await getBlueRailroads(config);
-    let showsWithChainData = await fetchChainDataForShows(shows, config);
-    let showsWithSetStoneData = await appendSetStoneDataToShows(showsWithChainData, config);
-    const vowelSoundContributions = await getVowelsoundContributions(config);
-
-
+    // Fetch data for enabled enumerable contracts
     const chainData = {
-        blueRailroads: blueRailroads,
         mainnetBlockNumber: mainnetBlockNumber,
         optimismBlockNumber: optimismBlockNumber,
         optimismSepoliaBlockNumber: optimismSepoliaBlockNumber,
-        showsWithChainData: showsWithSetStoneData,
-        vowelSoundContributions: vowelSoundContributions,
+        // Track which contracts were fetched
+        enumeratedContracts: enumerableContracts.contracts.filter(c => !c.disabled).map(c => c.name),
+    };
+
+    if (isContractEnabled('BlueRailroad')) {
+        console.log('Fetching Blue Railroad V1 tokens...');
+        chainData.blueRailroads = await getBlueRailroads(config);
     }
+
+    if (isContractEnabled('BlueRailroadV2')) {
+        console.log('Fetching Blue Railroad V2 tokens...');
+        chainData.blueRailroadV2s = await getBlueRailroadV2s(config);
+    }
+
+    if (isContractEnabled('SetStone')) {
+        console.log('Fetching SetStone data...');
+        let showsWithChainData = await fetchChainDataForShows(shows, config);
+        chainData.showsWithChainData = await appendSetStoneDataToShows(showsWithChainData, config);
+    }
+
+    // Vowel sound contributions (not an enumerable contract, but included in chain data)
+    const vowelSoundContributions = await getVowelsoundContributions(config);
+    chainData.vowelSoundContributions = vowelSoundContributions;
+
     return chainData;
 }
 

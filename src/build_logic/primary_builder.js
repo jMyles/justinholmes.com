@@ -22,7 +22,8 @@ import { appendChainDataToShows } from './chain_reading.js';
 
 // Feature-specific modules
 import { generateSetStonePages, renderSetStoneImages } from './setstone_utils.js';
-import { verifyBlueRailroadVideos } from './blue_railroad.js';
+import { verifyBlueRailroadVideos, generateBlueRailroadV2Metadata } from './blue_railroad.js';
+import { fetchPendingSubmissions } from './pickipedia_submissions.js';
 import { DateTime } from 'luxon';
 
 export const runPrimaryBuild = async () => {
@@ -79,9 +80,14 @@ export const runPrimaryBuild = async () => {
         }
     }
 
-    // Verify videos early
+    // Verify videos early (V1)
     const blueRailroadMetadata = await verifyBlueRailroadVideos();
     chainData.blueRailroads = blueRailroadMetadata;
+
+    // Generate V2 metadata JSON files (cryptograss.live serves these at /meta/bluerailroad/{tokenId})
+    if (site === 'cryptograss.live' && chainData.blueRailroadV2s) {
+        generateBlueRailroadV2Metadata(chainData.blueRailroadV2s, outputPrimarySiteDir);
+    }
 
     console.timeEnd("chain-data");
 
@@ -238,6 +244,16 @@ export const runPrimaryBuild = async () => {
     // A lot going on here - this is where we actually append things like set stones, ticket stubs, etc., to the shows.  Any further chain data that is required to render shows to templates needs to be added here.
     appendChainDataToShows(shows, chainData); // Mutates shows, obviously.
 
+    // Fetch pending Blue Railroad submissions from PickiPedia (cryptograss.live only)
+    let pendingSubmissions = [];
+    if (site === 'cryptograss.live') {
+        try {
+            pendingSubmissions = await fetchPendingSubmissions();
+        } catch (e) {
+            console.warn('Failed to fetch pending submissions from PickiPedia:', e.message);
+        }
+    }
+
     const dataAvailableAsContext = {
         "songs": songs,
         "shows": shows,
@@ -245,6 +261,7 @@ export const runPrimaryBuild = async () => {
         'latest_git_commit': execSync('git rev-parse HEAD').toString().trim(),
         'chainData': chainData,
         'pickers_by_instance_count': pickers_by_instance_count,
+        'pendingSubmissions': pendingSubmissions,
     };
 
     if (site === "justinholmes.com") { // TODO: Make this more general
@@ -623,6 +640,35 @@ export const runPrimaryBuild = async () => {
         }
     }
 
+    ///////////////////////////
+    // Chapter 5.5: Blue Railroad Submission Mint Pages
+    ///////////////////////////
+
+    if (site === "cryptograss.live" && pendingSubmissions.length > 0) {
+        // Ensure the mint directory exists
+        const mintDir = path.join(outputPrimarySiteDir, 'blox-office/admin/mint');
+        fs.mkdirSync(mintDir, { recursive: true, mode: 0o777 });
+
+        for (const submission of pendingSubmissions) {
+            const context = {
+                page_name: `mint_submission_${submission.id}`,
+                page_title: `Mint Submission #${submission.id}`,
+                submission: submission,
+                chainData: chainData,
+                latest_git_commit: dataAvailableAsContext.latest_git_commit,
+                no_video_bg: true,
+            };
+
+            renderPage({
+                template_path: 'pages/blox-office/admin/mint-submission.njk',
+                output_path: `blox-office/admin/mint/${submission.id}.html`,
+                context: context,
+                site: site,
+            });
+
+            console.log(`Generated mint page for submission #${submission.id}`);
+        }
+    }
 
     ///////////////////////////
     // Chapter 6: Cleanup

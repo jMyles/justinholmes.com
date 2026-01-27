@@ -13,29 +13,37 @@ const { outputPrimarySiteDir, outputPrimaryRootDir, outputDistDir, siteDir, srcD
 // Make sure the output directory exists
 fs.mkdirSync(outputDistDir, { recursive: true });
 
-const templatesPattern = path.join(outputPrimarySiteDir, '**/*.{html,xml}');
-const templateFiles = glob.sync(templatesPattern);
+// Build HTML plugin instances dynamically (called after prebuild completes)
+function buildHtmlPluginInstances() {
+    const templatesPattern = path.join(outputPrimarySiteDir, '**/*.{html,xml}');
+    const templateFiles = glob.sync(templatesPattern);
 
-const htmlPluginInstances = templateFiles.map(templatePath => {
-    const relativePath = path.relative(outputPrimarySiteDir, templatePath);
+    return templateFiles.map(templatePath => {
+        const relativePath = path.relative(outputPrimarySiteDir, templatePath);
 
-    if (relativePath.startsWith('tools/oracle-of-bluegrass-bacon')) {
-        var chunks = ['main', 'oracle_client'];
-    } else {
-        var chunks = ['main'];
-    }
+        if (relativePath.startsWith('tools/oracle-of-bluegrass-bacon')) {
+            var chunks = ['main', 'oracle_client'];
+        } else if (relativePath.startsWith('blox-office/admin/mint/')) {
+            var chunks = ['main', 'mint_submission'];
+        } else {
+            var chunks = ['main'];
+        }
 
-    return new HtmlWebpackPlugin({
-        template: templatePath,
-        filename: relativePath,
-        inject: "body",
-        chunks: chunks,
+        return new HtmlWebpackPlugin({
+            template: templatePath,
+            filename: relativePath,
+            inject: "body",
+            chunks: chunks,
+        });
     });
-});
+}
 
 const frontendJSDir = path.resolve(siteDir, 'js');
 
-export default {
+// Export a function that builds the config (to run glob after prebuild)
+export function buildConfig() {
+    const htmlPluginInstances = buildHtmlPluginInstances();
+    return {
     output: { path: outputDistDir },
     plugins: [
         new CopyPlugin({
@@ -94,6 +102,7 @@ export default {
         shapes: `${frontendJSDir}/shapes.js`,
         blue_railroad: `${frontendJSDir}/bazaar/blue_railroad.js`,
         oracle_client: `${frontendJSDir}/oracle_client.js`,
+        mint_submission: `${frontendJSDir}/mint-submission.js`,
     },
     module: {
         rules: [
@@ -103,4 +112,17 @@ export default {
             },
         ]
     },
-};
+    resolve: {
+        fallback: {
+            // Optional wagmi connector dependencies - not needed for basic wallet connection
+            '@base-org/account': false,
+            '@gemini-wallet/core': false,
+            'porto': false,
+            'porto/internal': false,
+        }
+    },
+    };
+}
+
+// Keep default export for backwards compatibility with prod build
+export default buildConfig();

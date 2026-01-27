@@ -9,11 +9,31 @@ onchain-merch:
   context:
     page_title: "Onchain Merch"
 
+all-setstones:
+  template: all-setstones.njk
+  include_data_in_context: ["shows", "chainData"]
+  context:
+    page_title: "All Set Stones"
+
 oracle-of-bluegrass-bacon:
   template: tools/oracle-of-bluegrass-bacon.njk
   context:
     title: "Oracle of Bluegrass Bacon"
     page_title: "Oracle of Bluegrass Bacon"
     description: "Connect any two musicians through shows and recordings - like Six Degrees of Kevin Bacon, but for bluegrass!"
+    no_video_bg: true
+
+blox-office/admin/mint-tony:
+  template: blox-office/admin/mint-tony.njk
+  include_data_in_context: ["chainData", "latest_git_commit"]
+  context:
+    page_title: "Mint Blue Railroad Tony"
+    no_video_bg: true
+
+blox-office/admin/pending-submissions:
+  template: blox-office/admin/pending-submissions.njk
+  include_data_in_context: ["pendingSubmissions", "chainData", "latest_git_commit"]
+  context:
+    page_title: "Pending Blue Railroad Submissions"
     no_video_bg: true
     
