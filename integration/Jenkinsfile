@@ -2,6 +2,7 @@ pipeline {
     agent any
 
     options {
+        disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '50'))
         parallelsAlwaysFailFast();
     }
@@ -14,6 +15,7 @@ pipeline {
         PR_BUILDS_DIR = '/var/jenkins_home/www/builds'
         SHARED_DATA_DIR = '/var/jenkins_home/shared'
         CHAIN_DATA_DIR = "${WORKSPACE}/output/_prebuild_chain_data"
+        PINATA_DATA_DIR = "${WORKSPACE}/output/_prebuild_pinata_data"
         COMMIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
         BRANCH_NAME = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
         IS_PRODUCTION = "${env.BRANCH_NAME == 'production' ? 'true' : 'false'}"
@@ -92,6 +94,20 @@ pipeline {
                     # Copy shared data to workspace
                     cp -r ${SHARED_DATA_DIR}/chain_data/* ${CHAIN_DATA_DIR}
                     cp ${CHAIN_DATA_DIR}/time_data.json src/data/time_data.json
+                '''
+            }
+        }
+
+        stage('Copy Pinata Data') {
+            steps {
+                sh '''#!/bin/bash
+                    if [ -f "${SHARED_DATA_DIR}/pinata_data/.last_fetch_success" ]; then
+                        mkdir -p ${PINATA_DATA_DIR}
+                        cp -r ${SHARED_DATA_DIR}/pinata_data/* ${PINATA_DATA_DIR}
+                        echo "Pinata data copied from shared location"
+                    else
+                        echo "Warning: Pinata data not found. IPFS status page may be stale."
+                    fi
                 '''
             }
         }
@@ -198,7 +214,7 @@ pipeline {
 
                                 node deployment/scripts/modify_build_htmls.js
 
-                                rsync -av output/dist/* ${PR_BUILDS_DIR}/${COMMIT_SHA}
+                                rsync -av --delete output/dist/* ${PR_BUILDS_DIR}/${COMMIT_SHA}
                             """
                         }
 
@@ -222,7 +238,7 @@ pipeline {
                         echo "Production build for ${COMMIT_SHA}"
                         sh "mkdir -p ${PR_BUILDS_DIR}/production"
                         sh """
-                            rsync -av output/dist/* ${PR_BUILDS_DIR}/production
+                            rsync -av --delete output/dist/* ${PR_BUILDS_DIR}/production
                         """
 
                         // Create deploy marker for root cron to pick up

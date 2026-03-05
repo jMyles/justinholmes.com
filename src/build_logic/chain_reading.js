@@ -1,16 +1,29 @@
 // @ts-check
-import {createConfig, http, readContract, fetchBlockNumber, fetchEnsName, getBlock} from '@wagmi/core';
+import {createConfig, http, readContract, fetchBlockNumber, fetchEnsName, fetchEnsAddress, getBlock} from '@wagmi/core';
 import {mainnet, optimism, optimismSepolia, arbitrum} from '@wagmi/core/chains';
 import {brABI as abi} from "../abi/blueRailroadABI.js";
+import {blueRailroadV2ABI} from "../abi/blueRailroadV2ABI.js";
 import {setStoneABI} from "../abi/setStoneABI.js";
-import { setStoneContractAddress, blueRailroadContractAddress, AVERAGE_BLOCK_TIME, ticketStubClaimerContractAddress } from "./constants.js";
+import { setStoneContractAddress, blueRailroadContractAddress, blueRailroadV2ContractAddress, AVERAGE_BLOCK_TIME, ticketStubClaimerContractAddress } from "./constants.js";
 import {ticketStubClaimerABI} from "../abi/ticketStubClaimerABI.js";
 import {getVowelsoundContributions} from "./revealer_utils.js";
 import Web3 from 'web3';
+import enumerableContracts from './enumerable_contracts.json' with { type: 'json' };
 
 const web3 = new Web3();
 import { config as dotenvConfig } from 'dotenv';
 import {fileURLToPath} from "url";
+
+// Check if a contract is enabled in the enumerable contracts config
+function isContractEnabled(name) {
+    const contract = enumerableContracts.contracts.find(c => c.name === name);
+    return contract && !contract.disabled;
+}
+
+// Get contract config by name
+function getContractConfig(name) {
+    return enumerableContracts.contracts.find(c => c.name === name);
+}
 import path from "path";
 import fs from "fs";
 import { getProjectDirs } from "./locations.js";
@@ -258,12 +271,7 @@ export async function appendSetStoneDataToShows(showsChainData, config) {
                     args: [setStoneId],
                 });
 
-                let ensName = await fetchEnsName(config, {address: ownerOfThisToken, chainId: 1});
-                if (ensName == undefined) {
-                    ensName = ownerOfThisToken;
-                }
-
-                setstone["owner"] = ensName;
+                setstone["owner"] = ownerOfThisToken;
 
                 let tokenURI = await readContract(config, {
                     abi: setStoneABI,
@@ -341,15 +349,110 @@ export async function getBlueRailroads(config) {
             args: [tokenId],
         });
 
+        // Fetch songId for this token
+        let songId = await readContract(config, {
+            abi,
+            address: blueRailroadContractAddress,
+            functionName: 'tokenIdToSongId',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        // Fetch date for this token (YYYYMMDD format)
+        let date = await readContract(config, {
+            abi,
+            address: blueRailroadContractAddress,
+            functionName: 'tokenIdToDate',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
         blueRailroads[tokenId] = {
+            id: tokenId,
             owner: ownerOfThisToken,
             uri: uriOfVideo,
-            id: tokenId
+            songId: songId,
+            date: date
         };
 
+        console.log(`Blue Railroad #${tokenId}: song ${songId}, date ${date}, owner ${ownerOfThisToken}`);
     }
     console.timeEnd("Blue Railroads (listen to that old smokestack)");
     return blueRailroads;
+}
+
+/**
+ * Fetch Blue Railroad V2 tokens with onchain metadata
+ * V2 stores songId, blockheight, and IPFS video hash onchain
+ */
+export async function getBlueRailroadV2s(config) {
+    console.time("Blue Railroad V2s");
+
+    const totalSupply = await readContract(config, {
+        abi: blueRailroadV2ABI,
+        address: blueRailroadV2ContractAddress,
+        functionName: 'totalSupply',
+        chainId: optimism.id,
+    });
+
+    console.log(`Blue Railroad V2 totalSupply: ${totalSupply}`);
+
+    let blueRailroadV2s = {};
+
+    for (let i = 0; i < totalSupply; i++) {
+        const tokenId = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenByIndex',
+            chainId: optimism.id,
+            args: [i],
+        });
+
+        const owner = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'ownerOf',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        const songId = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenIdToSongId',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        const blockheight = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenIdToBlockheight',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        const videoHash = await readContract(config, {
+            abi: blueRailroadV2ABI,
+            address: blueRailroadV2ContractAddress,
+            functionName: 'tokenIdToVideoHash',
+            chainId: optimism.id,
+            args: [tokenId],
+        });
+
+        blueRailroadV2s[tokenId.toString()] = {
+            id: tokenId,
+            owner: owner,
+            songId: Number(songId),
+            blockheight: Number(blockheight),
+            videoHash: videoHash, // bytes32 as hex string
+        };
+
+        console.log(`Blue Railroad V2 #${tokenId}: song ${songId}, blockheight ${blockheight}, owner ${owner}`);
+    }
+
+    console.timeEnd("Blue Railroad V2s");
+    return blueRailroadV2s;
 }
 
 export function appendChainDataToShows(shows, chainData) {
@@ -440,21 +543,205 @@ export async function fetch_chaindata(shows) {
     const optimismSepoliaBlockNumber = await fetchBlockNumber(config, {chainId: optimismSepolia.id});
     console.timeEnd("Block Heights");
 
-    const blueRailroads = await getBlueRailroads(config);
-    let showsWithChainData = await fetchChainDataForShows(shows, config);
-    let showsWithSetStoneData = await appendSetStoneDataToShows(showsWithChainData, config);
-    const vowelSoundContributions = await getVowelsoundContributions(config);
-
-
+    // Fetch data for enabled enumerable contracts
     const chainData = {
-        blueRailroads: blueRailroads,
         mainnetBlockNumber: mainnetBlockNumber,
         optimismBlockNumber: optimismBlockNumber,
         optimismSepoliaBlockNumber: optimismSepoliaBlockNumber,
-        showsWithChainData: showsWithSetStoneData,
-        vowelSoundContributions: vowelSoundContributions,
+        // Track which contracts were fetched
+        enumeratedContracts: enumerableContracts.contracts.filter(c => !c.disabled).map(c => c.name),
+    };
+
+    if (isContractEnabled('BlueRailroad')) {
+        console.log('Fetching Blue Railroad V1 tokens...');
+        chainData.blueRailroads = await getBlueRailroads(config);
     }
+
+    if (isContractEnabled('BlueRailroadV2')) {
+        console.log('Fetching Blue Railroad V2 tokens...');
+        chainData.blueRailroadV2s = await getBlueRailroadV2s(config);
+    }
+
+    if (isContractEnabled('SetStone')) {
+        console.log('Fetching SetStone data...');
+        let showsWithChainData = await fetchChainDataForShows(shows, config);
+        chainData.showsWithChainData = await appendSetStoneDataToShows(showsWithChainData, config);
+    }
+
+    // Vowel sound contributions (not an enumerable contract, but included in chain data)
+    const vowelSoundContributions = await getVowelsoundContributions(config);
+    chainData.vowelSoundContributions = vowelSoundContributions;
+
+    // Batch-resolve ENS names for all owner addresses, deduplicated
+    await resolveAndApplyEnsNames(config, chainData);
+
     return chainData;
+}
+
+/**
+ * Collect all unique owner addresses from chain data, resolve each ENS name
+ * exactly once, then populate ownerDisplay fields throughout.
+ */
+/**
+ * Fetch the address-to-display-name mapping from PickiPedia's semantic data.
+ * Pages with [[Primary ENS name::...]] are resolved to their current Ethereum
+ * addresses, building a map of address → wiki page title.
+ *
+ * Falls back to a cached version if PickiPedia is unreachable.
+ */
+async function fetchWikiAddressMap(config) {
+    const { chainDataDir } = getProjectDirs();
+    const cacheFile = path.resolve(chainDataDir, 'wiki-ens-cache.json');
+
+    let wikiEntries = [];
+    try {
+        const apiUrl = 'https://pickipedia.xyz/api.php?action=ask' +
+            '&query=%5B%5BPrimary%20ENS%20name%3A%3A%2B%5D%5D' +
+            '%7C%3FPrimary%20ENS%20name%7C%3FHas%20display%20name' +
+            '&format=json';
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        const results = data?.query?.results || {};
+
+        for (const [pageTitle, pageData] of Object.entries(results)) {
+            const ensNames = pageData?.printouts?.['Primary ENS name'] || [];
+            const displayNames = pageData?.printouts?.['Has display name'] || [];
+            const displayName = displayNames[0] || pageTitle;
+            for (const ensName of ensNames) {
+                if (ensName) {
+                    wikiEntries.push({ ensName, displayName });
+                }
+            }
+        }
+
+        // Cache for next time
+        if (wikiEntries.length > 0) {
+            fs.writeFileSync(cacheFile, JSON.stringify(wikiEntries, null, 2));
+            console.log(`Cached ${wikiEntries.length} wiki ENS entries to ${cacheFile}`);
+        }
+    } catch (e) {
+        console.log(`PickiPedia unreachable: ${e.message}`);
+        // Fall back to cache
+        if (fs.existsSync(cacheFile)) {
+            wikiEntries = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+            console.log(`Using cached wiki ENS data (${wikiEntries.length} entries)`);
+        }
+    }
+
+    // Forward-resolve each ENS name to its current address
+    const addressToDisplayName = new Map();
+    const ensToAddress = {};  // Also track ENS→address for external tools
+    for (const { ensName, displayName } of wikiEntries) {
+        try {
+            const address = await fetchEnsAddress(config, { name: ensName, chainId: 1 });
+            if (address) {
+                addressToDisplayName.set(address, displayName);
+                ensToAddress[ensName.toLowerCase()] = address;  // Lowercase for consistent lookups
+                console.log(`  ${ensName} → ${address} → ${displayName}`);
+            }
+        } catch (e) {
+            console.log(`  ENS forward lookup failed for ${ensName}: ${e.message}`);
+        }
+    }
+
+    return { addressToDisplayName, ensToAddress };
+}
+
+async function resolveAndApplyEnsNames(config, chainData) {
+    console.time("ENS Resolution (batch)");
+
+    // Step 1: Get wiki-curated address → display name map (and ENS→address for external tools)
+    const { addressToDisplayName: wikiMap, ensToAddress } = await fetchWikiAddressMap(config);
+    console.log(`Wiki address map: ${wikiMap.size} entries`);
+
+    // Add ENS→address mapping to chain data for external tools (like blue-railroad-import)
+    chainData.ensToAddress = ensToAddress;
+
+    // Step 2: Collect unique addresses from chain data
+    const addresses = new Set();
+
+    if (chainData.blueRailroads) {
+        for (const token of Object.values(chainData.blueRailroads)) {
+            if (token.owner) addresses.add(token.owner);
+        }
+    }
+    if (chainData.blueRailroadV2s) {
+        for (const token of Object.values(chainData.blueRailroadV2s)) {
+            if (token.owner) addresses.add(token.owner);
+        }
+    }
+    if (chainData.showsWithChainData) {
+        for (const show of Object.values(chainData.showsWithChainData)) {
+            if (show.ticketStubs) {
+                for (const stub of Object.values(show.ticketStubs)) {
+                    if (stub.owner) addresses.add(stub.owner);
+                }
+            }
+            if (show.sets) {
+                for (const set of Object.values(show.sets)) {
+                    if (set.setstones) {
+                        for (const stone of Object.values(set.setstones)) {
+                            if (stone.owner) addresses.add(stone.owner);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 3: For addresses not in the wiki map, try ENS reverse lookup
+    const displayMap = new Map(wikiMap);
+    const addressesNeedingEns = [...addresses].filter(a => !displayMap.has(a));
+    console.log(`${addresses.size} unique addresses, ${addresses.size - addressesNeedingEns.length} matched wiki, ${addressesNeedingEns.length} need ENS lookup`);
+
+    for (const address of addressesNeedingEns) {
+        try {
+            const ensName = await fetchEnsName(config, { address, chainId: 1 });
+            displayMap.set(address, ensName || address);
+        } catch (e) {
+            console.log(`ENS lookup failed for ${address}: ${e.message}`);
+            displayMap.set(address, address);
+        }
+    }
+
+    // Step 4: Apply display names to all chain data
+    if (chainData.blueRailroads) {
+        for (const token of Object.values(chainData.blueRailroads)) {
+            token.ownerDisplay = displayMap.get(token.owner) || token.owner;
+        }
+    }
+    if (chainData.blueRailroadV2s) {
+        for (const token of Object.values(chainData.blueRailroadV2s)) {
+            token.ownerDisplay = displayMap.get(token.owner) || token.owner;
+        }
+    }
+    if (chainData.showsWithChainData) {
+        for (const show of Object.values(chainData.showsWithChainData)) {
+            if (show.ticketStubs) {
+                for (const stub of Object.values(show.ticketStubs)) {
+                    if (stub.owner) {
+                        stub.ownerDisplay = displayMap.get(stub.owner) || stub.owner;
+                    }
+                }
+            }
+            if (show.sets) {
+                for (const set of Object.values(show.sets)) {
+                    if (set.setstones) {
+                        for (const stone of Object.values(set.setstones)) {
+                            if (stone.owner) {
+                                stone.ownerDisplay = displayMap.get(stone.owner) || stone.owner;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    const wikiResolvedCount = [...addresses].filter(a => wikiMap.has(a)).length;
+    const ensResolvedCount = [...displayMap.values()].filter(v => !v.startsWith('0x')).length - wikiResolvedCount;
+    console.log(`Resolved: ${wikiResolvedCount} from wiki, ${ensResolvedCount} from ENS, ${addresses.size - wikiResolvedCount - ensResolvedCount} unresolved`);
+    console.timeEnd("ENS Resolution (batch)");
 }
 
 export async function get_times_for_shows() {

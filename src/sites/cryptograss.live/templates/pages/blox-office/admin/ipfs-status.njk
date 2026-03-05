@@ -1,0 +1,439 @@
+{% extends '../../../base.njk' %}
+{% block main %}
+
+<div class="row">
+    <div class="col-1"></div>
+    <div class="col-md-10 text-post">
+        <h1 class="text-center pixel-font">IPFS Pinning Status</h1>
+        <p class="text-center text-muted">All known CIDs with pinning status across nodes</p>
+
+        {# Summary Cards #}
+        <div class="row mt-4 mb-4">
+            <div class="col-md-3">
+                <div class="card semi-transparent-bg text-center">
+                    <div class="card-body">
+                        <h3 class="mb-0">{{ pinataPins.allPins | length if pinataPins else 0 }}</h3>
+                        <small class="text-muted">Total CIDs</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card semi-transparent-bg text-center">
+                    <div class="card-body">
+                        <h3 class="mb-0 text-success">{{ pinataPins.gatewayCounts.pinata if pinataPins else 0 }}</h3>
+                        <small class="text-muted">On Pinata</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card semi-transparent-bg text-center">
+                    <div class="card-body">
+                        <h3 class="mb-0 text-info">{{ pinataPins.gatewayCounts.maybelle if pinataPins else 0 }}</h3>
+                        <small class="text-muted">On Maybelle</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card semi-transparent-bg text-center">
+                    <div class="card-body">
+                        <h3 class="mb-0 text-warning">{{ pinataPins.gatewayCounts.grasshouse if pinataPins else 0 }}</h3>
+                        <small class="text-muted">On GrassHouse</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if pinataPins %}
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <small class="text-muted">
+                            Pinata fetched: {{ pinataPins.fetchedAt }}
+                            {% if pinataPins.fetchedAtBlock %}
+                            <span class="badge bg-secondary ms-1" title="Ethereum block at fetch time">
+                                block {{ pinataPins.fetchedAtBlock | default('—') }}
+                            </span>
+                            {% endif %}
+                        </small>
+                    </div>
+                    <div>
+                        <small class="text-muted">
+                            Page built:
+                            {% if buildBlockheight %}
+                            <span class="badge bg-info" title="Ethereum block at build time">
+                                block {{ buildBlockheight }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# Unified CID Table #}
+        <div class="card semi-transparent-bg mb-4">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="card-title mb-0">All Known CIDs</h5>
+                    <div class="d-flex gap-2 align-items-center">
+                        <input type="text" id="search-input" class="form-control form-control-sm"
+                               placeholder="Search name or CID..." style="width: 200px;">
+                        <select id="category-filter" class="form-select form-select-sm" style="width: 150px;">
+                            <option value="">All Sources</option>
+                            <option value="minted-token">Minted Token</option>
+                            <option value="submission">Submission</option>
+                            <option value="recording">Recording</option>
+                            <option value="blue-railroad">Blue Railroad</option>
+                            <option value="unknown">Unknown</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm" id="all-cids-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>CID</th>
+                                <th class="text-end">Size</th>
+                                <th>Source</th>
+                                <th>Pinned</th>
+                                <th>Linked To</th>
+                                <th>Wiki Pages</th>
+                                <th class="text-center" title="Pinata Cloud">
+                                    <img src="https://docs.pinata.cloud/~gitbook/image?url=https%3A%2F%2F1627037926-files.gitbook.io%2F%7E%2Ffiles%2Fv0%2Fb%2Fgitbook-x-prod.appspot.com%2Fo%2Fspaces%252F-MUswiVNcdGBij6w0UBB%252Ficon%252FJdLyxBqcvLRnTrESj0rV%252F2023-09-26%252017.19.36.jpg%3Falt%3Dmedia%26token%3D4d7a37d8-40f5-48e6-9780-0bd44b58ee1a&width=32&dpr=2&quality=100&sign=c18b0b9d&sv=2" alt="Pinata" style="height: 18px; vertical-align: middle;">
+                                </th>
+                                <th class="text-center" title="Maybelle IPFS Node">
+                                    🎻
+                                </th>
+                                <th class="text-center" title="GrassHouse IPFS Node">
+                                    🏠
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {# First, render all Pinata pins #}
+                            {% if pinataPins and pinataPins.allPins %}
+                            {% for pin in pinataPins.allPins %}
+                            <tr data-cid="{{ pin.cid }}" data-category="{{ pin.category }}"
+                                data-name="{{ pin.name | lower }}" data-cid-lower="{{ pin.cid | lower }}"
+                                data-on-pinata="true">
+                                <td class="text-truncate" style="max-width: 200px;" title="{{ pin.name }}">
+                                    {{ pin.name or '(unnamed)' }}
+                                </td>
+                                <td class="font-monospace small">
+                                    <a href="https://gateway.pinata.cloud/ipfs/{{ pin.cid }}" target="_blank"
+                                       title="{{ pin.cid }}">
+                                        {{ pin.cid | truncate(16) }}
+                                    </a>
+                                </td>
+                                <td class="text-end small">
+                                    {% if pin.size %}
+                                        {% if pin.size > 1048576 %}
+                                            {{ (pin.size / 1048576) | round(1) }} MB
+                                        {% elif pin.size > 1024 %}
+                                            {{ (pin.size / 1024) | round(1) }} KB
+                                        {% else %}
+                                            {{ pin.size }} B
+                                        {% endif %}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if pin.category == 'minted-token' %}
+                                        <span class="badge bg-success">Minted</span>
+                                    {% elif pin.category == 'submission' %}
+                                        <span class="badge bg-info">Submission</span>
+                                    {% elif pin.category == 'recording' %}
+                                        <span class="badge bg-purple" style="background-color: #6f42c1;">Recording</span>
+                                    {% elif pin.category == 'blue-railroad' %}
+                                        <span class="badge bg-primary">Blue Railroad</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">Unknown</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small text-muted" style="font-size: 0.75em;">
+                                    {% if pin.date_pinned %}
+                                        {{ pin.date_pinned | truncate(16, true, '') | replace("T", " ") }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td class="small">
+                                    {% if pin.linkedTokenId %}
+                                        <a href="https://pickipedia.xyz/wiki/Blue_Railroad_Token_{{ pin.linkedTokenId }}"
+                                           target="_blank" class="text-success">
+                                            Token #{{ pin.linkedTokenId }}
+                                        </a>
+                                    {% elif pin.linkedSubmissionId %}
+                                        <a href="https://pickipedia.xyz/wiki/Blue_Railroad_Submission/{{ pin.linkedSubmissionId }}"
+                                           target="_blank" class="text-info">
+                                            Sub #{{ pin.linkedSubmissionId }}
+                                        </a>
+                                    {% elif pin.linkedRecording %}
+                                        <a href="{{ pin.linkedRecording.url }}"
+                                           target="_blank" style="color: #6f42c1;">
+                                            {{ pin.linkedRecording.title }} ({{ pin.linkedRecording.format }})
+                                        </a>
+                                    {% elif pin.keyvalues and pin.keyvalues.source %}
+                                        <span class="text-muted">{{ pin.keyvalues.source }}</span>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small">
+                                    {% set pages = pinataPins.cidPages[pin.cid] if pinataPins.cidPages else [] %}
+                                    {% if pages and pages | length > 0 %}
+                                        {% for page in pages %}
+                                            {% if loop.index <= 3 %}
+                                            <a href="{{ page.url }}" target="_blank" class="d-block text-truncate" style="max-width: 150px;" title="{{ page.title }}">
+                                                {{ page.title | replace("Blue_Railroad_", "") | replace("_", " ") }}
+                                            </a>
+                                            {% endif %}
+                                        {% endfor %}
+                                        {% if pages | length > 3 %}
+                                            <a href="#" class="text-muted small wiki-pages-expand" data-cid="{{ pin.cid }}">
+                                                +{{ pages | length - 3 }} more...
+                                            </a>
+                                            <div class="wiki-pages-hidden d-none" data-cid="{{ pin.cid }}">
+                                                {% for page in pages %}
+                                                    {% if loop.index > 3 %}
+                                                    <a href="{{ page.url }}" target="_blank" class="d-block text-truncate" style="max-width: 150px;" title="{{ page.title }}">
+                                                        {{ page.title | replace("Blue_Railroad_", "") | replace("_", " ") }}
+                                                    </a>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </div>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center pinata-status">
+                                    {% if pin.gatewayStatus.pinata %}
+                                    <span class="badge bg-success">✓</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">✗</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center maybelle-status">
+                                    {% if pin.gatewayStatus.maybelle %}
+                                    <span class="badge bg-success">✓</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">✗</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center grasshouse-status">
+                                    {% if pin.gatewayStatus.grasshouse %}
+                                    <span class="badge bg-success">✓</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">—</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+
+                            {# Then, render submissions that aren't already in Pinata pins #}
+                            {% for submission in allSubmissions %}
+                            {% if submission.ipfsCid %}
+                            {# Check if this CID is already in pinataPins #}
+                            {% set found = false %}
+                            {% if pinataPins and pinataPins.allPins %}
+                                {% for pin in pinataPins.allPins %}
+                                    {% if pin.cid == submission.ipfsCid %}
+                                        {% set found = true %}
+                                    {% endif %}
+                                {% endfor %}
+                            {% endif %}
+                            {% if not found %}
+                            <tr data-cid="{{ submission.ipfsCid }}" data-category="submission"
+                                data-name="{{ submission.exercise | lower }}" data-cid-lower="{{ submission.ipfsCid | lower }}"
+                                data-on-pinata="false">
+                                <td class="text-truncate" style="max-width: 200px;" title="Submission #{{ submission.id }}">
+                                    Submission #{{ submission.id }} - {{ submission.exercise }}
+                                </td>
+                                <td class="font-monospace small">
+                                    <a href="https://gateway.pinata.cloud/ipfs/{{ submission.ipfsCid }}" target="_blank"
+                                       title="{{ submission.ipfsCid }}">
+                                        {{ submission.ipfsCid | truncate(16) }}
+                                    </a>
+                                </td>
+                                <td class="text-end small">—</td>
+                                <td>
+                                    <span class="badge bg-info">Submission</span>
+                                </td>
+                                <td class="small text-muted">—</td>
+                                <td class="small">
+                                    <a href="https://pickipedia.xyz/wiki/Blue_Railroad_Submission/{{ submission.id }}" target="_blank" class="text-info">
+                                        Sub #{{ submission.id }}
+                                    </a>
+                                </td>
+                                <td class="small">
+                                    {% set pages = pinataPins.cidPages[submission.ipfsCid] if pinataPins.cidPages else [] %}
+                                    {% if pages and pages | length > 0 %}
+                                        {% for page in pages %}
+                                            {% if loop.index <= 3 %}
+                                            <a href="{{ page.url }}" target="_blank" class="d-block text-truncate" style="max-width: 150px;" title="{{ page.title }}">
+                                                {{ page.title | replace("Blue_Railroad_", "") | replace("_", " ") }}
+                                            </a>
+                                            {% endif %}
+                                        {% endfor %}
+                                        {% if pages | length > 3 %}
+                                            <a href="#" class="text-muted small wiki-pages-expand" data-cid="{{ submission.ipfsCid }}">
+                                                +{{ pages | length - 3 }} more...
+                                            </a>
+                                            <div class="wiki-pages-hidden d-none" data-cid="{{ submission.ipfsCid }}">
+                                                {% for page in pages %}
+                                                    {% if loop.index > 3 %}
+                                                    <a href="{{ page.url }}" target="_blank" class="d-block text-truncate" style="max-width: 150px;" title="{{ page.title }}">
+                                                        {{ page.title | replace("Blue_Railroad_", "") | replace("_", " ") }}
+                                                    </a>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </div>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center pinata-status">
+                                    <span class="badge bg-secondary">—</span>
+                                </td>
+                                <td class="text-center maybelle-status">
+                                    <span class="badge bg-secondary">—</span>
+                                </td>
+                                <td class="text-center grasshouse-status">
+                                    <span class="badge bg-secondary">—</span>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="badge bg-success me-1">Minted Token</span>
+                        <span class="badge bg-info me-1">Submission</span>
+                        <span class="badge me-1" style="background-color: #6f42c1;">Recording</span>
+                        <span class="badge bg-primary me-1">Blue Railroad</span>
+                        <span class="badge bg-warning text-dark me-1">Unknown</span>
+                    </div>
+                    <small class="text-muted" id="visible-count">
+                        Loading...
+                    </small>
+                </div>
+            </div>
+        </div>
+
+        {# IPFS Node Configuration #}
+        <div class="card semi-transparent-bg mb-4">
+            <div class="card-body">
+                <h5 class="card-title">IPFS Nodes</h5>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card bg-dark">
+                            <div class="card-body">
+                                <h6>Pinata (Cloud)</h6>
+                                <small class="text-muted">Primary pinning service</small>
+                                <div class="mt-2">
+                                    <span class="badge bg-success">Configured</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark">
+                            <div class="card-body">
+                                <h6>🎻 Maybelle</h6>
+                                <small class="text-muted">maybelle.cryptograss.live</small>
+                                <div class="mt-2">
+                                    <span class="badge bg-success">Configured</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-dark">
+                            <div class="card-body">
+                                <h6>🏠 GrassHouse</h6>
+                                <small class="text-muted">Home node (not yet configured)</small>
+                                <div class="mt-2">
+                                    <span class="badge bg-warning text-dark">Pending</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-1"></div>
+</div>
+
+<script type="module">
+    // Filtering (gateway status is pre-checked at build time)
+    const searchInput = document.getElementById('search-input');
+    const categoryFilter = document.getElementById('category-filter');
+    const visibleCount = document.getElementById('visible-count');
+    const tableBody = document.querySelector('#all-cids-table tbody');
+
+    function applyFilters() {
+        const searchTerm = searchInput?.value.toLowerCase() || '';
+        const category = categoryFilter?.value || '';
+        let visible = 0;
+
+        tableBody?.querySelectorAll('tr').forEach(row => {
+            const name = row.dataset.name || '';
+            const cid = row.dataset.cidLower || '';
+            const rowCategory = row.dataset.category || '';
+
+            const matchesSearch = !searchTerm || name.includes(searchTerm) || cid.includes(searchTerm);
+            const matchesCategory = !category || rowCategory === category;
+
+            if (matchesSearch && matchesCategory) {
+                row.style.display = '';
+                visible++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        if (visibleCount) {
+            visibleCount.textContent = `Showing ${visible} CIDs`;
+        }
+    }
+
+    searchInput?.addEventListener('input', applyFilters);
+    categoryFilter?.addEventListener('change', applyFilters);
+
+    // Initial count
+    document.addEventListener('DOMContentLoaded', () => {
+        applyFilters();
+
+        // Wiki pages expand/collapse
+        document.querySelectorAll('.wiki-pages-expand').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const cid = link.dataset.cid;
+                const hiddenDiv = document.querySelector(`.wiki-pages-hidden[data-cid="${cid}"]`);
+                if (hiddenDiv) {
+                    hiddenDiv.classList.toggle('d-none');
+                    link.textContent = hiddenDiv.classList.contains('d-none')
+                        ? link.textContent.replace('hide', 'more...')
+                        : link.textContent.replace('more...', 'hide');
+                }
+            });
+        });
+    });
+</script>
+
+{% endblock %}
